@@ -1,5 +1,5 @@
 # blockchain
-untuk installasi menggunakan python3
+untuk installasi menggunakan python3 <br>
 $ pip3 install flask
 $ pip3 install request
 
