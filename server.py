@@ -13,7 +13,7 @@ import requests
 from urllib.parse import urlparse
 
 class Blockchain(object):
-    difficulty_target = "00000000"
+    difficulty_target = "0000"
 
     def hash_block(self, block):
         block_encoded = json.dumps(block, sort_keys=True).encode()
