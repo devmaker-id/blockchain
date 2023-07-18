@@ -1,7 +1,7 @@
 # blockchain
 untuk installasi menggunakan python3 <br>
 $ pip3 install flask <br>
-$ pip3 install request <br>
+$ pip3 install requests <br>
 <hr>
 menjalankan server.py [port] <br>
 contoh : $ server.py 5010 <br>
