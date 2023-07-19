@@ -1,6 +1,7 @@
 import sys
 import hashlib
 import json
+import random
 
 from time import time
 from uuid import uuid4
@@ -21,8 +22,15 @@ class Blockchain(object):
 
     def __init__(self):
         self.nodes = set()
+        self.devnet = {
+          'currency': 'DevNet',
+          'suplay': 1000000,
+          'developer': 'devmaker-id'
+        }
 
         self.chain = []
+        
+        self.wallet = []
 
         self.current_transactions = []
 
@@ -32,6 +40,15 @@ class Blockchain(object):
             hash_of_previous_block = genesis_hash,
             nonce = self.proof_of_work(0, genesis_hash, [])
         )
+        
+    def update_currency(self, coin):
+      if coin < 0.000001:
+        return ('Transaction min 0.000002 devnet', 203)
+      
+      old_suplay = self.devnet['suplay']
+      self.devnet['suplay'] = old_suplay - coin 
+      
+      return self.devnet
     
     def add_node(self, address):
         parse_url = urlparse(address)
@@ -90,13 +107,43 @@ class Blockchain(object):
 
         while self.valid_proof(index, hash_of_previous_block, transactions, nonce) is False:
             nonce += 1
+        
+        if transactions:
+          self.valid_transaction(transactions)
+        
         return nonce
-
+        
+    def valid_transaction(self, transactions):
+      index_trx = 0
+      while index_trx < len(transactions):
+        is_trx = transactions[index_trx]
+        
+        if is_trx['sender'] == "0":
+          for wl in self.wallet:
+            if wl['wallet'] == is_trx['recipient']:
+              wl['amount'] = wl['amount'] + is_trx['amount']
+              self.update_currency(is_trx['amount'])
+          
+        if not is_trx['sender'] == "0":
+          for wl in self.wallet:
+            if wl['wallet'] == is_trx['sender']:
+              if not is_trx['amount'] < wl['amount']:
+                return ('not enough coins', 400)
+                
+              for rx in self.wallet:
+                if rx['wallet'] == is_trx['recipient']:
+                  wl['amount'] = wl['amount'] - is_trx['amount']
+                  rx['amount'] = rx['amount'] + is_trx['amount']
+          
+        index_trx += 1
+        
+      return True
+    
     def valid_proof(self,index, hash_of_previous_block, transactions, nonce):
         content = f'{index}{hash_of_previous_block}{transactions}{nonce}'.encode()
 
         content_hash = hashlib.sha256(content).hexdigest()
-
+        
         return content_hash[:len(self.difficulty_target)] == self.difficulty_target
 
 
@@ -118,9 +165,26 @@ class Blockchain(object):
         self.current_transactions.append({
             'amount': amount,
             'recipient': recipient,
-            'sender': sender
+            'sender': sender,
+            'time': time()
         })
         return self.last_block['index'] + 1
+        
+    def add_wallet(self):
+      new_wallet = str(uuid4()).replace('-', "")
+      with open('salt.json', 'r') as fs:
+        fa = json.load(fs)
+        seed = random.choices(fa, k=12)
+        wallet = {
+          'message': 'save you parse, required',
+          'wallet': "".join(["98xQ",new_wallet]),
+          'parse': seed,
+          'amount': 0,
+          'created': time()
+        }
+        
+      blockchain.wallet.append(wallet)
+      return wallet
 
     @property
     def last_block(self):
@@ -131,7 +195,48 @@ app = Flask(__name__)
 node_identifier = str(uuid4()).replace('-', "")
 
 blockchain = Blockchain()
+#route coin
+@app.route('/', methods=['GET'])
+def coin():
+  response = blockchain.devnet
+  return jsonify(response), 200
+  
+#route wallet
+@app.route('/wallet', methods=['GET'])
+def wallet():
+  response = {
+    'wallet': blockchain.wallet,
+    'length': len(blockchain.wallet)
+  }
+  
+  return jsonify(response), 200
+  
+@app.route('/wallet/<wallet>', methods=['GET'])
+def get_wallet(wallet):
+  
+  if not blockchain.wallet:
+    return jsonify({
+      'message': 'nothing wallet is blockchain'
+    }),403
+  
+  for wl in blockchain.wallet:
+    if wl['wallet'] == wallet:
+      return jsonify({
+        'amount': wl['amount'],
+        'wallet': wl['wallet']
+      }),200
+    
+  
+  return jsonify({
+    'message': 'wallet cant be registerd'
+  }),404
 
+@app.route('/wallet/new', methods=['GET'])
+def create_wallet():
+  response = blockchain.add_wallet()
+  
+  return jsonify(response),200
+  
 #routes
 @app.route('/blockchain', methods=['GET'])
 def full_chain():
@@ -142,12 +247,17 @@ def full_chain():
 
     return jsonify(response), 200
 
-@app.route('/mine', methods=['GET'])
+@app.route('/mine', methods=['POST'])
 def mine_block():
+    values = request.get_json()
+    
+    if not values['wallet']:
+      return ('Value Wallet Not found', 400)
+    
     blockchain.add_transaction(
-        sender="0",
-        recipient=node_identifier,
-        amount=1
+      sender="0",
+      recipient=values['wallet'],
+      amount=50
     )
 
     last_block_hash = blockchain.hash_block(blockchain.last_block)
@@ -157,7 +267,7 @@ def mine_block():
 
     block = blockchain.append_block(nonce, last_block_hash)
     response = {
-        'message': "Block baru telah ditambahkan (mined)",
+        'message': "Yes!, New Block add.",
         'index': block['index'],
         'hash_of_previous_block' : block['hash_of_previous_block'],
         'nonce': block['nonce'],
@@ -173,6 +283,11 @@ def new_transaction():
     required_fields = ['sender', 'recipient', 'amount']
     if not all(k in values for k in required_fields):
         return ('Missing fields', 400)
+      
+    for amn in blockchain.wallet:
+      if amn['wallet'] == values['sender']:
+        if amn['amount'] < values['amount']:
+          return ('not enough coins', 400)
     
     index = blockchain.add_transaction(
         values['sender'],
