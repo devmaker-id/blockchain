@@ -24,13 +24,19 @@ class Blockchain(object):
         self.nodes = set()
         self.devnet = {
           'currency': 'DevNet',
-          'suplay': 1000000,
+          'wallet': '98xQ000000000000000000000000000000',
+          'suplay': 1000000000,
           'developer': 'devmaker-id'
         }
 
         self.chain = []
         
-        self.wallet = []
+        self.wallet = [{
+          'wallet': '98xQ000000000000000000000000000000',
+          'verify_hash': '6fcd1725f8033e0fe0d28ec2380ff782ae156c50728f843ab79162a25389ffc4bec7fe308af68644319839f630729ba03d7601d6879881ee03f44d97260198c1',
+          'amount': 1000000000,
+          'created': 1689849337.8537545
+        }]
 
         self.current_transactions = []
 
@@ -41,14 +47,6 @@ class Blockchain(object):
             nonce = self.proof_of_work(0, genesis_hash, [])
         )
         
-    def update_currency(self, coin):
-      if coin < 0.000001:
-        return ('Transaction min 0.000002 devnet', 203)
-      
-      old_suplay = self.devnet['suplay']
-      self.devnet['suplay'] = old_suplay - coin 
-      
-      return self.devnet
     
     def add_node(self, address):
         parse_url = urlparse(address)
@@ -118,22 +116,18 @@ class Blockchain(object):
       while index_trx < len(transactions):
         is_trx = transactions[index_trx]
         
-        if is_trx['sender'] == "0":
-          for wl in self.wallet:
-            if wl['wallet'] == is_trx['recipient']:
-              wl['amount'] = wl['amount'] + is_trx['amount']
-              self.update_currency(is_trx['amount'])
-          
-        if not is_trx['sender'] == "0":
-          for wl in self.wallet:
-            if wl['wallet'] == is_trx['sender']:
-              if not is_trx['amount'] < wl['amount']:
-                return ('not enough coins', 400)
+        for wl in self.wallet:
+          if wl['wallet'] == is_trx['sender']:
+            if not is_trx['amount'] < wl['amount']:
+              return (jsonify({
+                'status': 'failed',
+                'data': 'koin dalam walet pengirim tidak mencukupi'
+              }), 400)
                 
-              for rx in self.wallet:
-                if rx['wallet'] == is_trx['recipient']:
-                  wl['amount'] = wl['amount'] - is_trx['amount']
-                  rx['amount'] = rx['amount'] + is_trx['amount']
+            for rx in self.wallet:
+              if rx['wallet'] == is_trx['recipient']:
+                wl['amount'] = wl['amount'] - is_trx['amount']
+                rx['amount'] = rx['amount'] + is_trx['amount']
           
         index_trx += 1
         
@@ -161,30 +155,70 @@ class Blockchain(object):
         self.chain.append(block)
         return block
 
-    def add_transaction(self, sender, recipient, amount):
-        self.current_transactions.append({
-            'amount': amount,
-            'recipient': recipient,
-            'sender': sender,
-            'time': time()
-        })
-        return self.last_block['index'] + 1
+    def add_transaction(self, parse, sender, recipient, amount):
+      hasWlt = self.hash_verify(sender, parse)
+      wal_data = []
+      
+      for recipient_wallet in self.wallet:
+        if recipient_wallet['wallet'] == recipient:
+          wal_data.append({
+            'type': 'recipient',
+            'data': recipient_wallet
+          })
+      
+      for recipient_wallet in self.wallet:
+        if recipient_wallet['wallet'] == sender:
+          wal_data.append({
+            'type': 'sender',
+            'data': recipient_wallet
+          })
+          
+      index_data = len(wal_data)
+      
+      if index_data != 2:
+        return ('cros chek wallet send/receiv', 201)
         
+      for in_trx in wal_data:
+        if in_trx['type'] == 'sender':
+          sendWallet = in_trx['data']
+          if sendWallet['verify_hash'] == hasWlt:
+            if sendWallet['amount'] > amount:
+              self.current_transactions.append({
+                'amount': amount,
+                'recipient': recipient,
+                'sender': sendWallet['wallet'],
+                'time': time()
+              })
+              return self.last_block['index'] + 1
+            else:
+              return ('saldo kurang', 403)
+          else:
+            return ('verfy hash tidak benar', 403)
+    
+    def hash_verify(self, wallet, seed):
+      return hashlib.sha512(wallet.encode() + seed.encode()).hexdigest()
+    
     def add_wallet(self):
       new_wallet = str(uuid4()).replace('-', "")
       with open('salt.json', 'r') as fs:
         fa = json.load(fs)
-        seed = random.choices(fa, k=12)
+        seed = " ".join(random.choices(fa, k=12))
+        nWallet = "".join(["98xQ",new_wallet])
+        
         wallet = {
-          'message': 'save you parse, required',
-          'wallet': "".join(["98xQ",new_wallet]),
-          'parse': seed,
+          'wallet': nWallet,
+          'verify_hash': blockchain.hash_verify(nWallet, seed),
           'amount': 0,
           'created': time()
         }
         
       blockchain.wallet.append(wallet)
-      return wallet
+      return {
+          'message': 'save you parse, required',
+          'wallet': nWallet,
+          'parse': seed,
+          'amount': 0,
+        }
 
     @property
     def last_block(self):
@@ -253,50 +287,64 @@ def mine_block():
     
     if not values['wallet']:
       return ('Value Wallet Not found', 400)
+    count_miner_wallet = []
     
+    for in_wallet in blockchain.wallet:
+      if in_wallet['wallet'] == values['wallet']:
+        count_miner_wallet = in_wallet['wallet']
+    
+    if not count_miner_wallet:
+      response = {
+        'status': 'failed',
+        'data': {
+          'wallet': values['wallet'],
+          'info': 'wallet not registred'
+        }
+      }
+      return (jsonify(response), 200)
+        
     blockchain.add_transaction(
-      sender="0",
+      parse='remember weather earth occur swung cap west citizen clean seat throughout refused',
+      sender="98xQ000000000000000000000000000000",
       recipient=values['wallet'],
-      amount=50
+      amount=100
     )
-
+        
     last_block_hash = blockchain.hash_block(blockchain.last_block)
 
     index = len(blockchain.chain)
     nonce = blockchain.proof_of_work(index, last_block_hash, blockchain.current_transactions)
-
+    
     block = blockchain.append_block(nonce, last_block_hash)
     response = {
-        'message': "Yes!, New Block add.",
-        'index': block['index'],
-        'hash_of_previous_block' : block['hash_of_previous_block'],
-        'nonce': block['nonce'],
-        'transaction': block['transaction']
+      'status': "success",
+      'index': block['index'],
+      'hash_of_previous_block' : block['hash_of_previous_block'],
+      'nonce': block['nonce'],
+      'transaction': block['transaction']
     }
-
-    return jsonify(response), 200
+    return (jsonify(response), 200)
 
 @app.route('/transactions/new', methods=['POST'])
 def new_transaction():
     values = request.get_json()
 
-    required_fields = ['sender', 'recipient', 'amount']
+    required_fields = ['seed', 'sender', 'recipient', 'amount']
     if not all(k in values for k in required_fields):
-        return ('Missing fields', 400)
-      
-    for amn in blockchain.wallet:
-      if amn['wallet'] == values['sender']:
-        if amn['amount'] < values['amount']:
-          return ('not enough coins', 400)
-    
-    index = blockchain.add_transaction(
-        values['sender'],
-        values['recipient'],
-        values['amount']
+      return ('Missing fields', 400)
+    last_transactions = blockchain.add_transaction(
+      values['seed'],
+      values['sender'],
+      values['recipient'],
+      values['amount']
     )
-
-    response = {'message': f'Transaksi akan ditambahkan ke blok {index}'}
-    return (jsonify(response), 201)
+    
+    print(last_transactions)
+    response = {
+      'status': 'success',
+      'data': f'Pending Block {last_transactions}'
+    }
+    return (jsonify(last_transactions), 201)
 
 
 @app.route('/nodes/add_nodes', methods=['POST'])
